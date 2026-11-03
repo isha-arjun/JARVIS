@@ -21,4 +21,4 @@ npm run dev
 ```
 
 ## Desktop
-See [desktop/README.md](desktop/README.md).
+See [desktop/README.md](desktop/README.md).\n## Optional AI reasoning\nThe desktop companion includes a local Ollama bridge for a no-API-key reasoning model. Install a compatible Ollama desktop build and pull a model before using it. If no local model is available, the app falls back to its built-in deterministic simulation templates. The model bridge only calls the local loopback service and does not execute external actions.\n
