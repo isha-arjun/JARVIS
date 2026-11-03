@@ -1,4 +1,4 @@
-function send(res: any, status: number, body: unknown) {
+const transcriptionBuckets = new Map<string, { count: number; resetAt: number }>();\n\nfunction send(res: any, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
@@ -10,7 +10,7 @@ export default async function handler(req: any, res: any) {
   const key = process.env.GROQ_API_KEY;
   if (!key) return send(res, 503, { error: "Groq transcription is not configured. Check the Vercel environment variable." });
 
-  const body = typeof req.body === "string" ? (() => { try { return JSON.parse(req.body); } catch { return null; } })() : req.body;
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();\n  const now = Date.now();\n  const bucket = transcriptionBuckets.get(ip);\n  if (bucket && bucket.resetAt > now && bucket.count >= 8) {\n    res.setHeader("Retry-After", String(Math.ceil((bucket.resetAt - now) / 1000)));\n    return send(res, 429, { error: "Too many voice transcriptions. Please wait a minute and try again." });\n  }\n  transcriptionBuckets.set(ip, !bucket || bucket.resetAt <= now ? { count: 1, resetAt: now + 60_000 } : { ...bucket, count: bucket.count + 1 });\n  if (transcriptionBuckets.size > 2000) for (const [k, v] of transcriptionBuckets) if (v.resetAt <= now) transcriptionBuckets.delete(k);\n\n  const body = typeof req.body === "string" ? (() => { try { return JSON.parse(req.body); } catch { return null; } })() : req.body;
   const encoded = typeof body?.audioBase64 === "string" ? body.audioBase64 : "";
   if (!encoded || encoded.length > 4_000_000) return send(res, 413, { error: "Audio is empty or too large. Try a shorter recording." });
   const mime = typeof body?.mimeType === "string" ? body.mimeType.split(";")[0] : "audio/webm";
