@@ -36,6 +36,54 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
   for (const p of patterns) { const m = text.match(p); if (m) { const n = Number(m[1].replace(/,/g, "")); if (Number.isFinite(n)) return n; } }
   return fallback;
 }
+function buildExplicitAdsSimulation(prompt: string): SimResult | null {
+  const s = prompt.toLowerCase();
+  if (!/(ad campaign|advertising campaign|google ads|\badvertis|\bcampaign\b)/i.test(s)) return null;
+  const budgetMatch = s.match(/(?:₹|rs\.?\s*|rupees?\s*)([\d,]+)|([\d,]+)\s*rupees?/i);
+  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\s*(?:a\s*)?([\d,]+)\s*clicks?/i);
+  const rateMatch = s.match(/(?:conversion rate|converts?)\D{0,18}(\d+(?:\.\d+)?)\s*%?/i);
+  if (!budgetMatch || !clicksMatch || !rateMatch) return null;
+  const budget = Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""));
+  const clicks = Number(clicksMatch[1].replace(/,/g, ""));
+  const ratePct = Number(rateMatch[1]);
+  if (![budget, clicks, ratePct].every(Number.isFinite) || budget <= 0 || clicks <= 0 || ratePct < 0 || ratePct > 100) return null;
+  const model: ModelSpec = {
+    name: "Ad campaign clicks-to-conversions",
+    formula: "clicks * conversion_rate",
+    trials: 10000,
+    variables: [
+      { name: "clicks", distribution: { type: "uniform", min: clicks * 0.9, max: clicks * 1.1 } },
+      { name: "conversion_rate", distribution: { type: "fixed", value: ratePct / 100 } }
+    ]
+  };
+  const output = runModel(model);
+  const cpc = budget / clicks;
+  return {
+    kind: "ads",
+    title: "Advertising campaign simulation",
+    summary: "A focused clicks-to-conversions model using your stated budget, approximate click volume and conversion rate. Click volume varies by ±10% to reflect the word “around.”",
+    metrics: [
+      { label: "Budget", value: "₹" + money(budget) },
+      { label: "Target clicks", value: money(clicks) },
+      { label: "Estimated conversions", value: output.mean.toFixed(2) },
+      { label: "Estimated cost per click", value: "₹" + cpc.toFixed(2) },
+      { label: "Conversion rate", value: ratePct.toFixed(2) + "%" },
+      { label: "5th–95th percentile", value: output.p05.toFixed(1) + "–" + output.p95.toFixed(1) }
+    ],
+    chart: output.samples,
+    notes: [
+      "This is an illustrative simulation, not a forecast of actual ad-platform performance.",
+      "No campaign is created and no money is spent."
+    ],
+    assumptions: [
+      "Budget: ₹" + money(budget),
+      "Clicks: " + money(clicks) + " target, varied by ±10%",
+      "Conversion rate: " + ratePct.toFixed(2) + "%",
+      "Implied CPC at the target: ₹" + cpc.toFixed(2),
+      "10,000 Monte Carlo trials"
+    ]
+  };
+}
 function simulate(kind: SimKind, prompt: string): SimResult {
   const s = prompt.toLowerCase();
   const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -91,6 +139,12 @@ export default function Workbench(){
  const Speech=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
  const latest=messages[messages.length-1];
  const send=async(value=prompt)=>{const q=value.trim();if(!q||busy)return;setError("");setBusy(true);setMessages(m=>[...m,{role:"user",text:q}]);setPrompt("");setTab("Command");try{
+  const explicitAds = buildExplicitAdsSimulation(q);
+  if (explicitAds) {
+    setBrainStatus("CONNECTED");
+    setMessages(m=>[...m,{role:"assistant",text:"I've extracted the campaign inputs directly and run a validated simulation.",result:explicitAds}]);
+    return;
+  }
   const decision=await askGroqBrain(q,messages.slice(-8));setBrainStatus("CONNECTED");
   if(decision.type==="answer"||decision.type==="clarify"){setMessages(m=>[...m,{role:"assistant",text:decision.reply}]);return;}
   const modelResult=runModel(decision.model as ModelSpec);
