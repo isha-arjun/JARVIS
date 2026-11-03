@@ -63,7 +63,7 @@ function sample(d: Distribution): number {
   if(d.type==="fixed") return d.value;
   if(d.type==="uniform") return d.min+u*(d.max-d.min);
   if(d.type==="normal") { const u1=Math.max(Number.EPSILON,Math.random()),u2=Math.random();return d.mean+d.sd*Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2); }
-  if(d.type==="triangular") { const f=(d.mode-d.min)/(d.max-d.min);return u<f?d.min+Math.sqrt(u*(d.max-d.min)*(d.mode-d.min)):d.max-Math.sqrt((1-u)*(d.max-d.min)*(d.max-d.mode)); }
+  if(d.type==="triangular") { if(d.max===d.min)return d.min; const f=(d.mode-d.min)/(d.max-d.min);return u<f?d.min+Math.sqrt(u*(d.max-d.min)*(d.mode-d.min)):d.max-Math.sqrt((1-u)*(d.max-d.min)*(d.max-d.mode)); }
   return u<d.probability?d.whenTrue:d.whenFalse;
 }
 const quantile=(sorted:number[],p:number)=>sorted[Math.min(sorted.length-1,Math.max(0,Math.floor((sorted.length-1)*p)))];
@@ -77,14 +77,23 @@ export function runModel(model: ModelSpec): ModelResult {
   if(!model.variables.length) throw new Error("Add at least one variable.");
   if(!Number.isInteger(model.trials)||model.trials<100||model.trials>100000) throw new Error("Trials must be between 100 and 100,000.");
   const names=new Set<string>();
-  for(const v of model.variables){if(!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.name))throw new Error("Variable names must use letters, numbers and underscores.");if(names.has(v.name))throw new Error("Variable names must be unique.");names.add(v.name);}
+  for(const v of model.variables){
+   if(!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.name))throw new Error("Variable names must use letters, numbers and underscores.");
+   if(names.has(v.name))throw new Error("Variable names must be unique.");names.add(v.name);
+   const d=v.distribution;const nums=Object.entries(d).filter(([k])=>k!=="type").map(([,x])=>Number(x));
+   if(nums.some(x=>!Number.isFinite(x)))throw new Error("All distribution parameters must be finite numbers.");
+   if(d.type==="uniform"&&d.min>d.max)throw new Error("Uniform minimum must not exceed its maximum.");
+   if(d.type==="normal"&&d.sd<0)throw new Error("Normal distribution standard deviation cannot be negative.");
+   if(d.type==="triangular"&&(d.min>d.mode||d.mode>d.max))throw new Error("Triangular distribution needs min ≤ mode ≤ max.");
+   if(d.type==="bernoulli"&&(d.probability<0||d.probability>1))throw new Error("Bernoulli probability must be between 0 and 1.");
+  }
   const outputs:number[]=[],inputs:Record<string,number[]>={};model.variables.forEach(v=>inputs[v.name]=[]);
   for(let i=0;i<model.trials;i++){const vars:Record<string,number>={};for(const v of model.variables){const value=sample(v.distribution);vars[v.name]=value;inputs[v.name].push(value);}outputs.push(evaluateFormula(model.formula,vars));}
   const sorted=[...outputs].sort((a,b)=>a-b),mean=outputs.reduce((a,b)=>a+b,0)/outputs.length;
   return {name:model.name,formula:model.formula,trials:model.trials,mean,median:quantile(sorted,.5),p05:quantile(sorted,.05),p25:quantile(sorted,.25),p75:quantile(sorted,.75),p95:quantile(sorted,.95),probabilityPositive:outputs.filter(x=>x>0).length/outputs.length,probabilityNegative:outputs.filter(x=>x<0).length/outputs.length,min:sorted[0],max:sorted[sorted.length-1],samples:sorted.filter((_,i)=>i%Math.max(1,Math.floor(sorted.length/100))===0).slice(0,100),sensitivity:model.variables.map(v=>({name:v.name,correlation:corr(inputs[v.name],outputs)})).sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation))};
 }
 export const EXAMPLES: ModelSpec[] = [
- {name:"Campaign net return",formula:"conversions * value_per_conversion - spend",trials:10000,variables:[{name:"spend",distribution:{type:"fixed",value:2000}},{name:"cpc",distribution:{type:"uniform",min:6,max:12}},{name:"conversion_rate",distribution:{type:"uniform",min:.015,max:.04}},{name:"value_per_conversion",distribution:{type:"fixed",value:900}},{name:"conversions",distribution:{type:"fixed",value:0}}]},
+ {name:"Campaign net return",formula:"spend / cpc * conversion_rate * value_per_conversion - spend",trials:10000,variables:[{name:"spend",distribution:{type:"fixed",value:2000}},{name:"cpc",distribution:{type:"uniform",min:6,max:12}},{name:"conversion_rate",distribution:{type:"uniform",min:.015,max:.04}},{name:"value_per_conversion",distribution:{type:"fixed",value:900}}]},
  {name:"Project cost overrun",formula:"planned_cost * (1 + overrun_rate)",trials:10000,variables:[{name:"planned_cost",distribution:{type:"fixed",value:50000}},{name:"overrun_rate",distribution:{type:"triangular",min:0,mode:.08,max:.35}}]},
  {name:"Subscription revenue",formula:"customers * monthly_price * months",trials:10000,variables:[{name:"customers",distribution:{type:"normal",mean:500,sd:70}},{name:"monthly_price",distribution:{type:"fixed",value:299}},{name:"months",distribution:{type:"fixed",value:12}}]}
 ];
