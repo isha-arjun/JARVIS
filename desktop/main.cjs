@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain } = require("electron");
+const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, session } = require("electron");
 const path = require("node:path");
 let win;
 let tray;
@@ -37,7 +37,7 @@ ipcMain.handle("jarvis:ask-local-model", async (_event, args) => {
     const data = await response.json(); return String(data.message?.content || "");
   } finally { clearTimeout(timer); }
 });
-app.whenReady().then(() => {
+app.whenReady().then(() => {\n  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {\n    const ownApp = webContents.getURL().startsWith("http://127.0.0.1:5173") || webContents.getURL().startsWith("file://");\n    callback(ownApp && permission === "media" && (details.mediaTypes || []).includes("audio"));\n  });
   createWindow();
   globalShortcut.register("CommandOrControl+Shift+Space", toggleWindow);
   tray = new Tray(nativeImage.createEmpty());
