@@ -28,7 +28,11 @@ function tokenize(source: string): Token[] {
   tokens.push({kind:"eof",value:""}); return tokens;
 }
 export function evaluateFormula(formula: string, vars: Record<string, number>): number {
-  const tokens = tokenize(formula); let pos = 0;
+  // Accept model-style assignments such as "conversions = clicks * rate",
+  // but evaluate only the right-hand arithmetic expression.
+  const expressionSource = formula.trim().replace(/^[a-zA-Z_][a-zA-Z0-9_]*\\s*=\\s*(?!=)/, "");
+  if (!expressionSource.trim()) throw new Error("The formula is empty.");
+  const tokens = tokenize(expressionSource); let pos = 0;
   const peek = () => tokens[pos]; const take = () => tokens[pos++];
   function primary(): number {
     const t = take();
@@ -80,8 +84,16 @@ export function runModel(model: ModelSpec): ModelResult {
   for(const v of model.variables){
    if(!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(v.name))throw new Error("Variable names must use letters, numbers and underscores.");
    if(names.has(v.name))throw new Error("Variable names must be unique.");names.add(v.name);
-   const d=v.distribution;const nums=Object.entries(d).filter(([k])=>k!=="type").map(([,x])=>Number(x));
-   if(nums.some(x=>!Number.isFinite(x)))throw new Error("All distribution parameters must be finite numbers.");
+   const d=v.distribution;
+   if(!d || !["fixed","uniform","normal","triangular","bernoulli"].includes(d.type)) throw new Error("Choose a supported distribution for variable: "+v.name+".");
+   const required: Record<string,string[]> = {
+     fixed:["value"], uniform:["min","max"], normal:["mean","sd"],
+     triangular:["min","mode","max"], bernoulli:["probability","whenTrue","whenFalse"]
+   };
+   const params = required[d.type].map(key => (d as any)[key]);
+   if(params.some(x => typeof x !== "number" || !Number.isFinite(x))) {
+     throw new Error("Variable “"+v.name+"” has a missing or invalid "+d.type+" parameter. Enter a finite number for every parameter.");
+   }
    if(d.type==="uniform"&&d.min>d.max)throw new Error("Uniform minimum must not exceed its maximum.");
    if(d.type==="normal"&&d.sd<0)throw new Error("Normal distribution standard deviation cannot be negative.");
    if(d.type==="triangular"&&(d.min>d.mode||d.mode>d.max))throw new Error("Triangular distribution needs min ≤ mode ≤ max.");
