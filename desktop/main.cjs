@@ -1,7 +1,7 @@
 const { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage } = require("electron");
 const path = require("node:path");
 let win;
-let tray;
+let tray;\nlet isQuitting = false;
 function createWindow() {
   win = new BrowserWindow({
     width: 1180, height: 820, minWidth: 760, minHeight: 560,
@@ -11,7 +11,7 @@ function createWindow() {
   const devUrl = process.env.JARVIS_DEV_URL || "http://127.0.0.1:5173";
   if (!app.isPackaged) win.loadURL(devUrl); else win.loadFile(path.join(__dirname, "../dist/index.html"));
   win.once("ready-to-show", () => win.show());
-  win.on("closed", () => { win = null; });
+  win.on("close", (event) => { if (!isQuitting) { event.preventDefault(); win.hide(); } });\n  win.on("closed", () => { win = null; });
 }
 function toggleWindow() {
   if (!win) { createWindow(); return; }
@@ -21,12 +21,12 @@ app.whenReady().then(() => {
   createWindow();
   globalShortcut.register("CommandOrControl+Shift+Space", toggleWindow);
   tray = new Tray(nativeImage.createEmpty());
-  tray.setToolTip("JARVIS Personal Intelligence");
+  tray.setToolTip("JARVIS Personal Intelligence");\n  tray.on("click", toggleWindow);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open JARVIS", click: toggleWindow },
     { label: "Quit", click: () => app.quit() }
   ]));
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("before-quit", () => { isQuitting = true; });\napp.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
