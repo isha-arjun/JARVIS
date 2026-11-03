@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "desktop": "electron desktop/main.cjs",
-    "desktop:dev": "concurrently \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron desktop/main.cjs\""
+    "desktop:dev": "concurrently \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron desktop/main.cjs\"",
+    "dist:mac": "npm run build && electron-builder --mac dmg --x64"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -23,6 +24,32 @@
     "@types/react-dom": "^18.3.5",
     "electron": "33.4.11",
     "concurrently": "^9.1.2",
-    "wait-on": "^8.0.2"
+    "wait-on": "^8.0.2",
+    "electron-builder": "^26.0.12"
+  },
+  "main": "desktop/main.cjs",
+  "build": {
+    "appId": "com.isha.jarvis",
+    "productName": "JARVIS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "10.15.0"
+    }
   }
 }
