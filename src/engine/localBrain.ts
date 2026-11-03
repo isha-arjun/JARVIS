@@ -1,6 +1,7 @@
 export type BrainDecision =
  | { type:"simulation"; reply:string; model:{name:string;formula:string;trials:number;variables:any[]} }
- | { type:"answer"|"clarify"; reply:string };
+ | { type:"answer"; reply:string }
+ | { type:"clarify"; reply:string };
 export async function askLocalBrain(prompt:string, model="qwen2.5:3b"):Promise<BrainDecision>{
  if(prompt.length>8000)throw new Error("Please keep each request under 8,000 characters.");
  const system=`You are JARVIS, a precise and helpful personal assistant. Understand the user's request. If they ask to simulate or model a scenario, produce a mathematical model with explicit assumptions. If essential inputs are missing, ask a concise clarifying question instead of inventing important values. For general questions, answer directly. Return ONLY valid JSON matching one of these forms:
