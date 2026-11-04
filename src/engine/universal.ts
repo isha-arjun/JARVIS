@@ -30,7 +30,7 @@ function tokenize(source: string): Token[] {
 export function evaluateFormula(formula: string, vars: Record<string, number>): number {
   // Accept model-style assignments such as "conversions = clicks * rate",
   // but evaluate only the right-hand arithmetic expression.
-  const expressionSource = formula.trim().replace(/^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(?!=)/, "");
+  const expressionSource = formula.trim().replace(/;+$/, "").replace(/^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*(?!=)/, "");
   if (!expressionSource.trim()) throw new Error("The formula is empty.");
   const tokens = tokenize(expressionSource); let pos = 0;
   const peek = () => tokens[pos]; const take = () => tokens[pos++];
