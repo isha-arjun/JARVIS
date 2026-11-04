@@ -7,15 +7,28 @@ export type ChatTurn = { role: "assistant" | "user"; text: string };
 
 export async function askGroqBrain(prompt: string, history: ChatTurn[] = []): Promise<BrainDecision> {
   if (prompt.length > 8000) throw new Error("Please keep each request under 8,000 characters.");
-  const response = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      history: history.slice(-8).map((m) => ({ role: m.role, content: m.text }))
-    })
-  });
-  const data = await response.json().catch(() => ({}));
+  let response: Response;
+  try {
+    response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        history: history.slice(-8).map((m) => ({ role: m.role, content: m.text }))
+      })
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error("JARVIS couldn't reach its /api/chat service. Check your connection and make sure you're using the deployed JARVIS site; the chat service may be unavailable.");
+    }
+    throw error;
+  }
+  const raw = await response.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch {
+    if (!response.ok) throw new Error("JARVIS chat service returned HTTP " + response.status + " with a non-JSON response.");
+    throw new Error("JARVIS chat service returned an unreadable response. Check the latest deployment.");
+  }
   if (!response.ok) throw new Error(typeof data?.error === "string" ? data.error : "JARVIS could not reach its Groq brain.");
   if (!data || !["answer", "clarify", "simulation"].includes(data.type) || typeof data.reply !== "string") {
     throw new Error("JARVIS received an unsupported response.");
