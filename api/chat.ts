@@ -47,19 +47,27 @@ export default async function handler(req: any, res: any) {
   }) : [];
 
   try {
-    const upstream = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const messages = [{ role: "system", content: SYSTEM_PROMPT + memoryContext }, ...history, { role: "user", content: prompt }];
+    const requestGroq = (jsonMode: boolean) => fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
         model: MODEL,
-        messages: [{ role: "system", content: SYSTEM_PROMPT + memoryContext }, ...history, { role: "user", content: prompt }],
-        temperature: 0.2,
+        messages,
+        temperature: jsonMode ? 0.2 : 0,
         max_completion_tokens: 1800,
-        response_format: { type: "json_object" }
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {})
       })
     });
-    const data = await upstream.json().catch(() => ({}));
+    let upstream = await requestGroq(true);
+    let data = await upstream.json().catch(() => ({}));
+    // Groq can occasionally reject a generated JSON response even in JSON mode.
+    // Retry once with the same strict JSON instructions but without constrained decoding.
+    if (!upstream.ok && upstream.status === 400 && /failed_generation|validate json|json/i.test(String(data?.error?.message || ""))) {
+      upstream = await requestGroq(false);
+      data = await upstream.json().catch(() => ({}));
+    }
     if (!upstream.ok) {
       const detail = typeof data?.error?.message === "string" ? data.error.message : "Groq request failed.";
       return send(res, upstream.status === 429 ? 429 : 502, { error: detail });
