@@ -70,6 +70,54 @@ function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string
     "This assumes the conversion rate represents clicks that become paying customers; it is an estimate, not measured campaign performance."
   ].join("\n");
 }
+function buildExplicitCacSimulation(prompt: string, history: Message[] = []): SimResult | null {
+  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join("\\n");
+  if (!/\\b(cac|customer acquisition cost|cost per customer)\\b/i.test(conversation)) return null;
+  const last = (pattern: RegExp): number | null => {
+    const matches = [...conversation.matchAll(pattern)];
+    const match = matches[matches.length - 1];
+    if (!match) return null;
+    const raw = match[1] || match[2];
+    const value = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const spend = last(/(?:₹|rs\\.?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?\\b/gi);
+  const clicks = last(/([\\d,]+)\\s*clicks?\\b|\\bclicks?\\s*(?:of|at|to)?\\s*([\\d,]+)/gi);
+  const rate = last(/(?:conversion rate|converts?)\\D{0,24}(\\d+(?:\\.\\d+)?)\\s*%/gi) ?? last(/(\\d+(?:\\.\\d+)?)\\s*%/g);
+  const price = last(/(?:\\$|usd\\s*)(\\d+(?:\\.\\d+)?)/gi);
+  if (spend === null || clicks === null || rate === null || price === null || rate > 100) return null;
+  const scenarios = [Math.max(0.01, rate * 0.5), rate, Math.min(100, rate * 1.5)];
+  const rows = scenarios.map((conversion, i) => {
+    const customers = clicks * conversion / 100;
+    return { name: ["Conservative", "Base case", "Optimistic"][i], rate: conversion, customers, cac: spend / customers, revenue: customers * price };
+  });
+  const base = rows[1];
+  return {
+    kind: "ads",
+    title: "Customer acquisition cost — campaign simulation",
+    summary: "A three-scenario acquisition model using your supplied spend, clicks, conversion rate and product price. Revenue is gross revenue before fees, refunds, taxes or other costs.",
+    metrics: [
+      { label: "Ad spend", value: "₹" + money(spend) },
+      { label: "Estimated clicks", value: money(clicks) },
+      { label: "Base-case customers", value: money(base.customers) },
+      { label: "Base-case CAC", value: "₹" + base.cac.toFixed(2) },
+      { label: "Product price", value: "$" + price.toFixed(2) },
+      { label: "Base-case gross revenue", value: "$" + base.revenue.toFixed(2) },
+      { label: "Base-case revenue / ad spend", value: (base.revenue / spend).toFixed(2) + "× (currency conversion not applied)" }
+    ],
+    chart: rows.map(row => row.cac),
+    notes: ["CAC = ad spend ÷ estimated paying customers.", "Customers = clicks × conversion rate.", "Revenue is shown in USD; ad spend and CAC are shown in INR. No currency conversion is assumed.", "This is a deterministic scenario comparison, not a forecast or measured campaign result."]
+    ,assumptions: rows.map(row => row.name + ": " + row.rate.toFixed(2) + "% conversion; " + row.customers.toFixed(1) + " customers; CAC ₹" + row.cac.toFixed(2) + "; gross revenue $" + row.revenue.toFixed(2))
+  };
+}
+function isIncompleteCacRequest(prompt: string, history: Message[] = []): string | null {
+  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join(" ");
+  if (!/\\b(cac|customer acquisition cost|cost per customer)\\b/i.test(conversation)) return null;
+  if (!/(?:₹|rs\\.?\\s*|[\\d,]+\\s*rupees?)/i.test(conversation) || !/\\d[\\d,]*\\s*clicks?\\b/i.test(conversation)) return null;
+  if (!/(?:conversion rate|converts?)\\D{0,24}\\d+(?:\\.\\d+)?\\s*%|\\d+(?:\\.\\d+)?\\s*%/i.test(conversation)) return "What conversion rate should I use for the CAC simulation?";
+  if (!/(?:\\$|usd\\s*)\\d+(?:\\.\\d+)?/i.test(conversation)) return "What is the product price in USD? I need it to estimate gross revenue.";
+  return null;
+}
 function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): SimResult | null {
   const s = prompt.toLowerCase();
   const previousAds = [...history].reverse().find((m) => m.role === "assistant" && m.result?.kind === "ads")?.result;
@@ -219,6 +267,18 @@ export default function Workbench(){
   if(/^(?:jarvis[, ]*)?(?:forget everything|forget all my memories|clear my memory)\.?$/i.test(q)){setMemories([]);addAssistantMessage({role:"assistant",text:"Your saved JARVIS memories on this device have been cleared."});return;}
   const forgetMatch=q.match(/^(?:jarvis[, ]*)?forget(?: about)?\s+(.+)$/i);
   if(forgetMatch){const target=forgetMatch[1].trim().toLowerCase();const matched=memories.some(item=>item.text.toLowerCase().includes(target));setMemories(current=>current.filter(item=>!item.text.toLowerCase().includes(target)));addAssistantMessage({role:"assistant",text:matched?"Removed the matching saved memory.":"I couldn't find a saved memory matching that phrase."});return;}
+  const cacSimulation = buildExplicitCacSimulation(q, messages);
+  if (cacSimulation) {
+    setBrainStatus("LOCAL SIMULATION");
+    addAssistantMessage({role:"assistant",text:"I've run the CAC scenarios directly from your inputs, without relying on generated formulas.",result:cacSimulation});
+    return;
+  }
+  const cacClarification = isIncompleteCacRequest(q, messages);
+  if (cacClarification) {
+    setBrainStatus("NEEDS INPUT");
+    addAssistantMessage({role:"assistant",text:cacClarification});
+    return;
+  }
   const explicitCac = buildExplicitCacAnswer(q, messages);
   if (explicitCac) {
     setBrainStatus("LOCAL CALCULATION");
