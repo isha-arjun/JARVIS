@@ -38,96 +38,59 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
 }
 function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): SimResult | null {
   const s = prompt.toLowerCase();
-  const previousAds = [...history].reverse().find((message) => message.role === "assistant" && message.result?.kind === "ads")?.result;
-  const hasAdContext = /\\b(ad|ads|advertising|campaign|youtube)\\b/.test(s) || !!previousAds;
-  if (!hasAdContext) return null;
-
+  const previousAds = [...history].reverse().find((m) => m.role === "assistant" && m.result?.kind === "ads")?.result;
+  if (!/\\b(ad|ads|advertising|campaign|youtube|clicks?)\\b/.test(s) && !previousAds) return null;
   const budgetMatch = s.match(/(?:₹|rs\\.?\\s*|rupees?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?/i);
-  const previousBudget = previousAds?.metrics.find((metric) => metric.label.toLowerCase() === "budget")?.value.match(/[\\d,.]+/)?.[0];
-  const budget = budgetMatch
-    ? Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""))
-    : previousBudget ? Number(previousBudget.replace(/,/g, "")) : NaN;
+  const previousBudget = previousAds?.metrics.find((m) => m.label.toLowerCase() === "budget")?.value.match(/[\\d,.]+/)?.[0];
+  const budget = budgetMatch ? Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, "")) : previousBudget ? Number(previousBudget.replace(/,/g, "")) : NaN;
   if (!Number.isFinite(budget) || budget <= 0) return null;
-
-  const parseClicks = (match: RegExpMatchArray | null) => match ? Number((match[1] || match[2]).replace(/,/g, "")) : null;
-  const conservativeMatch = s.match(/conservative(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i);
-  const optimisticMatch = s.match(/optimistic(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i);
-  const balancedMatch = s.match(/balanced(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i);
-  const genericMatch = s.match(/(?:around|about|approximately|roughly)?\\s*(?:a\\s*)?([\\d,]+)\\s*clicks?|(?:estimated|expected|total)?\\s*clicks?\\s*(?:of|to|at|=|:)?\\s*([\\d,]+)/i);
-  const cpcMatch = s.match(/(?:cpc|cost per click)\\D{0,12}(?:₹|rs\\.?\\s*)?([\\d,.]+)/i);
+  const read = (m: RegExpMatchArray | null) => m ? Number((m[1] || m[2]).replace(/,/g, "")) : null;
+  const conservative = read(s.match(/conservative(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
+  const optimistic = read(s.match(/optimistic(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
+  const balanced = read(s.match(/balanced(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
+  const generic = read(s.match(/(?:expected\\s+outcome|expected|estimated)?\\s*clicks?\\s*[-:=]?\\s*([\\d,]+)|([\\d,]+)\\s*clicks?/i));
   const rateMatch = s.match(/(?:conversion rate|converts?)\\D{0,18}(\\d+(?:\\.\\d+)?)\\s*%?/i);
-
-  const conservativeClicks = parseClicks(conservativeMatch);
-  const optimisticClicks = parseClicks(optimisticMatch);
-  const balancedClicks = parseClicks(balancedMatch);
-  const statedClicks = parseClicks(genericMatch);
-  const statedCpc = cpcMatch ? Number(cpcMatch[1].replace(/,/g, "")) : null;
-  const statedRate = rateMatch ? Number(rateMatch[1]) : null;
-  const supplied = [conservativeClicks, optimisticClicks, balancedClicks, statedClicks, statedCpc, statedRate].filter((value): value is number => value !== null);
-  if (supplied.some((value) => !Number.isFinite(value) || value <= 0) || (statedRate !== null && statedRate > 100)) return null;
-
-  const getPreviousClicks = (label: string) => {
-    const value = previousAds?.metrics.find((metric) => metric.label.toLowerCase() === label)?.value.match(/[\\d,.]+/)?.[0];
-    return value ? Number(value.replace(/,/g, "")) : null;
-  };
-  const hasNamedRange = conservativeClicks !== null || optimisticClicks !== null;
-  const priorBalanced = getPreviousClicks("balanced clicks");
-  const fallback = statedClicks ?? priorBalanced;
-  const low = conservativeClicks ?? (hasNamedRange ? fallback ?? optimisticClicks : fallback);
-  const high = optimisticClicks ?? (hasNamedRange ? fallback ?? conservativeClicks : fallback);
-  if (low === null && statedCpc === null) return null;
-  const mid = balancedClicks ?? (low !== null && high !== null ? (low + high) / 2 : fallback ?? low ?? high!);
-  const clickVolumes = [low ?? mid, mid, high ?? mid];
-  const scenarioNames = ["Conservative", "Balanced", "Optimistic"];
-  const conversionRates = [statedRate ?? 1, statedRate ?? 2.5, statedRate ?? 4];
-
-  const results = clickVolumes.map((clicks, index) => {
-    const cpc = statedCpc ?? budget / clicks;
-    const model: ModelSpec = {
-      name: "Neon Aether " + scenarioNames[index] + " YouTube ad scenario",
-      formula: "clicks * conversion_rate",
-      trials: 10000,
-      variables: [
-        { name: "clicks", distribution: { type: "uniform", min: clicks * 0.9, max: clicks * 1.1 } },
-        { name: "conversion_rate", distribution: { type: "uniform", min: Math.max(0, conversionRates[index] * 0.5 / 100), max: Math.min(1, conversionRates[index] * 1.5 / 100) } }
-      ]
-    };
-    return { clicks, cpc, rate: conversionRates[index], output: runModel(model) };
+  const rateInput = rateMatch ? Number(rateMatch[1]) : null;
+  if ([conservative, optimistic, balanced, generic, rateInput].some((v) => v !== null && (!Number.isFinite(v) || v <= 0)) || (rateInput !== null && rateInput > 100)) return null;
+  const previousBalancedText = previousAds?.metrics.find((m) => m.label.toLowerCase() === "balanced clicks")?.value.match(/[\\d,.]+/)?.[0];
+  const fallback = generic ?? (previousBalancedText ? Number(previousBalancedText.replace(/,/g, "")) : null);
+  const rangeGiven = conservative !== null || optimistic !== null;
+  const low = conservative ?? (rangeGiven ? fallback ?? optimistic : fallback);
+  const high = optimistic ?? (rangeGiven ? fallback ?? conservative : fallback);
+  if (low === null) return null;
+  const middle = balanced ?? (low + (high ?? low)) / 2;
+  const clicks = [low, middle, high ?? middle];
+  const names = ["Conservative", "Balanced", "Optimistic"];
+  const rates = [rateInput ?? 1, rateInput ?? 2.5, rateInput ?? 4];
+  const scenarios = clicks.map((count, i) => {
+    const cpc = budget / count;
+    const model: ModelSpec = { name: "Neon Aether " + names[i] + " ad scenario", formula: "clicks * conversion_rate", trials: 10000, variables: [
+      { name: "clicks", distribution: { type: "fixed", value: count } },
+      { name: "conversion_rate", distribution: { type: "uniform", min: Math.max(0, rates[i] * 0.5 / 100), max: Math.min(1, rates[i] * 1.5 / 100) } }
+    ]};
+    return { clicks: count, cpc, output: runModel(model) };
   });
-  const balanced = results[1];
-  const recoveredBudget = !budgetMatch && !!previousBudget;
-  const assumptions = [
-    "Campaign budget: ₹" + money(budget) + (recoveredBudget ? " (carried forward from the previous simulation)" : ""),
-    "Three separate YouTube campaign scenarios, each with 10,000 Monte Carlo trials",
-    ...results.map((item, index) => scenarioNames[index] + ": " + money(item.clicks) + " clicks, implied CPC ₹" + item.cpc.toFixed(2) + ", target-action rate " + item.rate.toFixed(2) + "%"),
-    "CPC is calculated as campaign budget divided by estimated clicks.",
-    statedRate !== null ? "Conversion rate supplied by user and applied to all scenarios." : "Target-action rates (1%, 2.5%, 4%) are illustrative planning assumptions, not measured campaign data."
-  ];
+  const mid = scenarios[1];
   return {
     kind: "ads",
-    title: "Neon Aether — ₹" + money(budget) + " YouTube ad campaign simulations",
-    summary: "Three scenarios compare the same fixed budget at different click volumes. Target actions are modeled separately from clicks and are not guaranteed results.",
+    title: "Neon Aether — ₹" + money(budget) + " ad campaign simulations",
+    summary: "Fixed-budget campaign model. Click estimates are inputs; CPC is calculated as budget divided by clicks. Target actions are modeled separately. Revenue and profit are not assumed.",
     metrics: [
       { label: "Budget", value: "₹" + money(budget) },
-      { label: "Conservative clicks", value: money(results[0].clicks) },
-      { label: "Conservative CPC", value: "₹" + results[0].cpc.toFixed(2) },
-      { label: "Conservative target actions", value: results[0].output.mean.toFixed(2) },
-      { label: "Balanced clicks", value: money(results[1].clicks) },
-      { label: "Balanced CPC", value: "₹" + results[1].cpc.toFixed(2) },
-      { label: "Balanced target actions", value: balanced.output.mean.toFixed(2) },
-      { label: "Optimistic clicks", value: money(results[2].clicks) },
-      { label: "Optimistic CPC", value: "₹" + results[2].cpc.toFixed(2) },
-      { label: "Optimistic target actions", value: results[2].output.mean.toFixed(2) },
-      { label: "Balanced 5th–95th percentile", value: balanced.output.p05.toFixed(2) + "–" + balanced.output.p95.toFixed(2) }
+      { label: "Conservative clicks", value: money(scenarios[0].clicks) },
+      { label: "Conservative CPC", value: "₹" + scenarios[0].cpc.toFixed(2) },
+      { label: "Conservative target actions", value: scenarios[0].output.mean.toFixed(2) },
+      { label: "Balanced clicks", value: money(mid.clicks) },
+      { label: "Balanced CPC", value: "₹" + mid.cpc.toFixed(2) },
+      { label: "Balanced target actions", value: mid.output.mean.toFixed(2) },
+      { label: "Optimistic clicks", value: money(scenarios[2].clicks) },
+      { label: "Optimistic CPC", value: "₹" + scenarios[2].cpc.toFixed(2) },
+      { label: "Optimistic target actions", value: scenarios[2].output.mean.toFixed(2) },
+      { label: "Balanced 5th–95th percentile", value: mid.output.p05.toFixed(2) + "–" + mid.output.p95.toFixed(2) }
     ],
-    chart: balanced.output.samples,
-    notes: [
-      "Illustrative scenarios only—not a YouTube forecast, platform quote, or promise of results.",
-      "The 250–700 click range is a user-supplied scenario assumption, not a verified YouTube estimate.",
-      "Actual delivery depends on campaign objective, audience, creative, auction, targeting and landing page.",
-      "No ad campaign is created, no account is accessed, and no money is spent."
-    ],
-    assumptions
+    chart: mid.output.samples,
+    notes: ["Illustrative planning model, not a YouTube forecast or guaranteed outcome.", "Click counts are fixed scenario inputs.", "Conversion rates (1%, 2.5%, 4%) are assumptions unless supplied by the user.", "No revenue or profit is calculated without explicit monetization assumptions.", "No campaign is created and no money is spent."],
+    assumptions: ["Budget: ₹" + money(budget), "Three scenarios with 10,000 trials each", ...scenarios.map((item, i) => names[i] + ": " + money(item.clicks) + " clicks; CPC ₹" + item.cpc.toFixed(2) + "; target-action rate " + rates[i].toFixed(2) + "%"), "CPC = budget ÷ clicks.", rateInput !== null ? "Conversion rate supplied by user." : "Conversion rates are illustrative, not measured campaign data."]
   };
 }
 function simulate(kind: SimKind, prompt: string): SimResult {
