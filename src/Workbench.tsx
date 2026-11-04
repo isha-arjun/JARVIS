@@ -103,7 +103,6 @@ function buildExplicitCacSimulation(prompt: string, history: Message[] = []): Si
       { label: "Base-case CAC", value: "₹" + base.cac.toFixed(2) },
       { label: "Product price", value: "$" + price.toFixed(2) },
       { label: "Base-case gross revenue", value: "$" + base.revenue.toFixed(2) },
-      { label: "Base-case revenue / ad spend", value: (base.revenue / spend).toFixed(2) + "× (currency conversion not applied)" }
     ],
     chart: rows.map(row => row.cac),
     notes: ["CAC = ad spend ÷ estimated paying customers.", "Customers = clicks × conversion rate.", "Revenue is shown in USD; ad spend and CAC are shown in INR. No currency conversion is assumed.", "This is a deterministic scenario comparison, not a forecast or measured campaign result."]
