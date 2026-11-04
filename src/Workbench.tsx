@@ -140,7 +140,33 @@ function simulate(kind: SimKind, prompt: string): SimResult {
   const revenue=parseNumber(s,[/(?:revenue|sales)\D{0,12}(?:₹|rs\.?\s*)?([\d,]+)/],50000),cost=parseNumber(s,[/(?:cost|expense|budget)\D{0,12}(?:₹|rs\.?\s*)?([\d,]+)/],30000);
   return {kind,title:"Business performance simulation",summary:"A baseline operating model. Adjust the assumptions to match the business you are analyzing.",metrics:[{label:"Revenue",value:"₹"+money(revenue)},{label:"Costs",value:"₹"+money(cost)},{label:"Net result",value:"₹"+money(revenue-cost)},{label:"Margin",value:(revenue?((revenue-cost)/revenue*100):0).toFixed(1)+"%"}],chart:Array.from({length:10},(_,i)=>Math.max(0,revenue-cost+rand(-cost*.25,cost*.25))),notes:["This model excludes tax, working capital, financing and other costs unless added to assumptions."],assumptions:["Revenue: ₹"+money(revenue),"Costs: ₹"+money(cost)]};
 }
-function speak(text:string){if(!("speechSynthesis" in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang="en-GB";u.rate=.92;u.pitch=.88;const voices=window.speechSynthesis.getVoices();const v=voices.find(x=>/en-GB/i.test(x.lang)&&/male|daniel|george|oliver/i.test(x.name))||voices.find(x=>/en-GB/i.test(x.lang));if(v)u.voice=v;window.speechSynthesis.speak(u);}
+function speak(text:string){
+ if(!("speechSynthesis" in window)||!text.trim())return;
+ const synth=window.speechSynthesis;synth.cancel();
+ const clean=text.replace(/\*\*(.*?)\*\*/g,"$1").replace(/\s+/g," ").trim();
+ const u=new SpeechSynthesisUtterance(clean);u.lang="en-GB";u.rate=.97;u.pitch=.94;u.volume=1;
+ const voices=synth.getVoices();
+ const preferred=voices.find(x=>/en-GB/i.test(x.lang)&&/daniel|george|oliver|ryan|male/i.test(x.name))
+  ||voices.find(x=>/en-US/i.test(x.lang)&&/alex|daniel|male/i.test(x.name))
+  ||voices.find(x=>/en-GB/i.test(x.lang))
+  ||voices.find(x=>/^en/i.test(x.lang));
+ if(preferred)u.voice=preferred;
+ synth.speak(u);
+}
+function wakeTokenDistance(a:string,b:string){
+ const row=Array.from({length:b.length+1},(_,i)=>i);
+ for(let i=1;i<=a.length;i++){let prev=row[0];row[0]=i;for(let j=1;j<=b.length;j++){const old=row[j];row[j]=Math.min(row[j]+1,row[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));prev=old;}}
+ return row[b.length];
+}
+function findWakePhrase(transcript:string){
+ const words=transcript.toLowerCase().replace(/[^a-z' ]/g," ").split(/\s+/).filter(Boolean);
+ const aliases=new Set(["jarvis","jervis","charvis","jarvus","travis","service"]);
+ for(let i=0;i<words.length;i++){
+  const word=words[i].replace(/'s$/,"");
+  if(aliases.has(word)||wakeTokenDistance(word,"jarvis")<=1)return {index:i,words};
+ }
+ return null;
+}
 function ResultCard({result}:{result:SimResult}){const max=Math.max(1,...result.chart.map(Math.abs));return <div className="result-card"><div className="result-head"><span className="eyebrow">SIMULATION COMPLETE</span><span className="result-tag">ILLUSTRATIVE MODEL</span></div><h3>{result.title}</h3><p className="muted">{result.summary}</p><div className="metric-grid">{result.metrics.map(m=><div className="metric" key={m.label}><small>{m.label}</small><strong>{m.value}</strong>{m.detail&&<span>{m.detail}</span>}</div>)}</div><div className="chart"><div className="chart-label">SCENARIO PROFILE</div><div className="bars">{result.chart.map((v,i)=><div key={i} className="bar-wrap"><div className="bar" style={{height:Math.max(4,Math.abs(v)/max*100)+"%"}}/><small>{i+1}</small></div>)}</div></div><div className="result-columns"><div><b>Assumptions</b>{result.assumptions.map(x=><p key={x}>• {x}</p>)}</div><div><b>Limitations & safeguards</b>{result.notes.map(x=><p key={x}>• {x}</p>)}</div></div></div>}
 export default function Workbench(){
  const [messages,setMessages]=useState<Message[]>([{role:"assistant",text:"Good evening. JARVIS systems are online. I can model campaigns, businesses, growth, pricing, delivery plans, funnels, risk and complex systems. Tell me what you would like to explore."}]);
@@ -186,22 +212,26 @@ export default function Workbench(){
   };
   wakeResume.current=()=>{wakeBusy.current=false;scheduleRestart();};
   try{
-    r=new Speech();recognition.current=r;r.lang="en-GB";r.continuous=true;r.interimResults=true;
+    r=new Speech();recognition.current=r;r.lang="en-IN";r.continuous=true;r.interimResults=true;r.maxAlternatives=3;
     r.onresult=(e:any)=>{
-      let transcript="";
-      for(let i=e.resultIndex;i<e.results.length;i++)transcript+=e.results[i][0].transcript;
-      const match=transcript.match(/\bjarvis\b[,. ]*(.*)/i);
-      if(match&&!wakeBusy.current){
+      if(wakeBusy.current)return;
+      for(let i=Math.max(0,e.resultIndex-1);i<e.results.length;i++){
+        const result=e.results[i];
+        const alternatives=Array.from(result as any) as any[];
+        const heard=alternatives.map((alt:any)=>String(alt.transcript||"")).find(Boolean)||"";
+        const wakeMatch=findWakePhrase(heard);
+        if(!wakeMatch)continue;
         wakeBusy.current=true;
-        const command=match[1].trim();
+        const command=wakeMatch.words.slice(wakeMatch.index+1).join(" ").trim();
         try{r.stop()}catch{}
         if(command.length>2){
           speak("Certainly.");
           send(command).finally(()=>wakeResume.current());
         }else{
-          speak("Yes, ma’am?");
-          window.setTimeout(()=>startVoice(),900);
+          speak("I'm listening. Go ahead.");
+          window.setTimeout(()=>startVoice(),1100);
         }
+        break;
       }
     };
     r.onerror=(e:any)=>{
