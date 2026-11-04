@@ -36,19 +36,22 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
   for (const p of patterns) { const m = text.match(p); if (m) { const n = Number(m[1].replace(/,/g, "")); if (Number.isFinite(n)) return n; } }
   return fallback;
 }
-function buildExplicitAdsSimulation(prompt: string): SimResult | null {
+function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): SimResult | null {
   const s = prompt.toLowerCase();
   if (!/\b(ad|ads|advertising|campaign)\b/.test(s)) return null;
 
   const budgetMatch = s.match(/(?:₹|rs\.?\s*|rupees?\s*)([\d,]+)|([\d,]+)\s*rupees?/i);
-  if (!budgetMatch) return null;
-  const budget = Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""));
+  const previousAds = [...history].reverse().find((message) => message.role === "assistant" && message.result?.kind === "ads")?.result;
+  const previousBudget = previousAds?.metrics.find((metric) => metric.label.toLowerCase() === "budget")?.value.match(/[\d,.]+/)?.[0];
+  const budget = budgetMatch
+    ? Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""))
+    : previousBudget ? Number(previousBudget.replace(/,/g, "")) : NaN;
   if (!Number.isFinite(budget) || budget <= 0) return null;
 
-  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\s*(?:a\s*)?([\d,]+)\s*clicks?/i);
+  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\s*(?:a\s*)?([\d,]+)\s*clicks?|(?:estimated|expected|total)?\s*clicks?\s*(?:of|to|at|=|:)?\s*([\d,]+)/i);
   const cpcMatch = s.match(/(?:cpc|cost per click)\D{0,12}(?:₹|rs\.?\s*)?([\d,.]+)/i);
   const rateMatch = s.match(/(?:conversion rate|converts?)\D{0,18}(\d+(?:\.\d+)?)\s*%?/i);
-  const statedClicks = clicksMatch ? Number(clicksMatch[1].replace(/,/g, "")) : null;
+  const statedClicks = clicksMatch ? Number((clicksMatch[1] || clicksMatch[2]).replace(/,/g, "")) : null;
   const statedCpc = cpcMatch ? Number(cpcMatch[1].replace(/,/g, "")) : null;
   const statedRate = rateMatch ? Number(rateMatch[1]) : null;
   if ((statedClicks !== null && (!Number.isFinite(statedClicks) || statedClicks <= 0)) ||
@@ -56,9 +59,9 @@ function buildExplicitAdsSimulation(prompt: string): SimResult | null {
       (statedRate !== null && (!Number.isFinite(statedRate) || statedRate < 0 || statedRate > 100))) return null;
 
   const scenarios = [
-    { name: "Conservative", cpc: statedCpc || (statedClicks ? budget / statedClicks * 1.25 : 12), rate: statedRate ?? 1 },
+    { name: "Conservative", cpc: statedCpc || (statedClicks ? budget / statedClicks : 12), rate: statedRate ?? 1 },
     { name: "Balanced", cpc: statedCpc || (statedClicks ? budget / statedClicks : 8), rate: statedRate ?? 2.5 },
-    { name: "Optimistic", cpc: statedCpc || (statedClicks ? budget / statedClicks * 0.75 : 5), rate: statedRate ?? 4 }
+    { name: "Optimistic", cpc: statedCpc || (statedClicks ? budget / statedClicks : 5), rate: statedRate ?? 4 }
   ];
   const results = scenarios.map((scenario) => {
     const estimatedClicks = statedClicks || budget / scenario.cpc;
@@ -75,13 +78,14 @@ function buildExplicitAdsSimulation(prompt: string): SimResult | null {
   });
   const balanced = results[1];
   const explicitClicks = statedClicks !== null && statedClicks > 0;
+  const budgetRecoveredFromHistory = !budgetMatch && !!previousBudget;
   const assumptions = [
-    "Campaign budget: ₹" + money(budget),
+    "Campaign budget: ₹" + money(budget) + (budgetRecoveredFromHistory ? " (carried forward from the previous simulation)" : ""),
     "Three scenarios, each with 10,000 Monte Carlo trials",
     "Conservative: CPC ₹" + scenarios[0].cpc.toFixed(2) + ", target-action rate " + scenarios[0].rate.toFixed(2) + "%",
     "Balanced: CPC ₹" + scenarios[1].cpc.toFixed(2) + ", target-action rate " + scenarios[1].rate.toFixed(2) + "%",
     "Optimistic: CPC ₹" + scenarios[2].cpc.toFixed(2) + ", target-action rate " + scenarios[2].rate.toFixed(2) + "%",
-    explicitClicks ? "Click volume supplied by user; CPC scenarios are illustrative." : "Click volumes are estimated from the scenario CPC assumptions.",
+    explicitClicks ? "Click volume supplied by user; implied CPC is ₹" + (budget / statedClicks!).toFixed(2) + " across the fixed-budget campaign." : "Click volumes are estimated from the scenario CPC assumptions.",
     statedRate !== null ? "Conversion rate supplied by user." : "Conversion rates are illustrative planning assumptions, not measured Neon Aether campaign data."
   ];
 
@@ -163,7 +167,7 @@ export default function Workbench(){
  const Speech=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
  const latest=messages[messages.length-1];
  const send=async(value=prompt)=>{const q=value.trim();if(!q||busy)return;setError("");setBusy(true);setMessages(m=>[...m,{role:"user",text:q}]);setPrompt("");setTab("Command");try{
-  const explicitAds = buildExplicitAdsSimulation(q);
+  const explicitAds = buildExplicitAdsSimulation(q, messages);
   if (explicitAds) {
     setBrainStatus("CONNECTED");
     setMessages(m=>[...m,{role:"assistant",text:"I've extracted the campaign inputs directly and run a validated simulation.",result:explicitAds}]);
