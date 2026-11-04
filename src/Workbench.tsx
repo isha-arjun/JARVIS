@@ -36,6 +36,37 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
   for (const p of patterns) { const m = text.match(p); if (m) { const n = Number(m[1].replace(/,/g, "")); if (Number.isFinite(n)) return n; } }
   return fallback;
 }
+function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string | null {
+  if (!/\\b(cac|customer acquisition cost|cost per customer)\\b/i.test(prompt)) return null;
+  const conversation = [...history.filter((m) => m.role === "user").map((m) => m.text), prompt].join("\\n");
+  const lastNumber = (pattern: RegExp): number | null => {
+    const matches = [...conversation.matchAll(pattern)];
+    const match = matches[matches.length - 1];
+    if (!match) return null;
+    const raw = match[1] || match[2];
+    const value = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(value) && value > 0 ? value : null;
+  };
+  const spend = lastNumber(/(?:₹|rs\\.?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?\\b/gi);
+  const clicks = lastNumber(/([\\d,]+)\\s*clicks?\\b|\\bclicks?\\s*(?:of|at|to)?\\s*([\\d,]+)/gi);
+  const conversionRate = lastNumber(/([\\d]+(?:\\.[\\d]+)?)\\s*%/gi);
+  if (spend === null || clicks === null || conversionRate === null || conversionRate > 100) return null;
+  const customers = clicks * conversionRate / 100;
+  if (customers <= 0) return null;
+  const cac = spend / customers;
+  return [
+    "Based on the figures in our conversation:",
+    "",
+    "- Ad spend: ₹" + money(spend),
+    "- Clicks: " + money(clicks),
+    "- Conversion rate: " + conversionRate + "%",
+    "- Estimated paying customers: " + money(customers),
+    "- **Customer acquisition cost (CAC): ₹" + cac.toFixed(2) + " per customer**",
+    "",
+    "Calculation: ₹" + money(spend) + " ÷ " + money(customers) + " customers = ₹" + cac.toFixed(2) + " CAC.",
+    "This assumes the 10% conversion rate represents clicks that become paying customers; it is an estimate, not measured campaign performance."
+  ].join("\\n");
+}
 function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): SimResult | null {
   const s = prompt.toLowerCase();
   const previousAds = [...history].reverse().find((m) => m.role === "assistant" && m.result?.kind === "ads")?.result;
@@ -174,6 +205,12 @@ export default function Workbench(){
  const Speech=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
  const latest=messages[messages.length-1];
  const send=async(value=prompt)=>{const q=value.trim();if(!q||busy)return;setError("");setBusy(true);setMessages(m=>[...m,{role:"user",text:q}]);setPrompt("");setTab("Command");try{
+  const explicitCac = buildExplicitCacAnswer(q, messages);
+  if (explicitCac) {
+    setBrainStatus("LOCAL CALCULATION");
+    setMessages(m=>[...m,{role:"assistant",text:explicitCac}]);
+    return;
+  }
   const explicitAds = buildExplicitAdsSimulation(q, messages);
   if (explicitAds) {
     setBrainStatus("CONNECTED");
