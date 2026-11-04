@@ -5,7 +5,7 @@ export type BrainDecision =
 
 export type ChatTurn = { role: "assistant" | "user"; text: string };
 
-export async function askGroqBrain(prompt: string, history: ChatTurn[] = []): Promise<BrainDecision> {
+export async function askGroqBrain(prompt: string, history: ChatTurn[] = [], memories: string[] = []): Promise<BrainDecision> {
   if (prompt.length > 8000) throw new Error("Please keep each request under 8,000 characters.");
   let response: Response;
   try {
@@ -14,7 +14,8 @@ export async function askGroqBrain(prompt: string, history: ChatTurn[] = []): Pr
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
-        history: history.slice(-8).map((m) => ({ role: m.role, content: m.text }))
+        history: history.slice(-8).map((m) => ({ role: m.role, content: m.text })),
+        memories: memories.slice(0, 50)
       })
     });
   } catch (error) {
