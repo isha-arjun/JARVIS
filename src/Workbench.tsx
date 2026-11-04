@@ -38,57 +38,72 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
 }
 function buildExplicitAdsSimulation(prompt: string): SimResult | null {
   const s = prompt.toLowerCase();
-  if (!/(ad campaign|advertising campaign|google ads|\\badvertis|\\bcampaign\\b)/i.test(s)) return null;
-  const budgetMatch = s.match(/(?:₹|rs\\.?\\s*|rupees?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?/i);
+  if (!/\b(ad|ads|advertising|campaign)\b/.test(s)) return null;
+
+  const budgetMatch = s.match(/(?:₹|rs\.?\s*|rupees?\s*)([\d,]+)|([\d,]+)\s*rupees?/i);
   if (!budgetMatch) return null;
   const budget = Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""));
   if (!Number.isFinite(budget) || budget <= 0) return null;
 
-  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\\s*(?:a\\s*)?([\\d,]+)\\s*clicks?/i);
-  const cpcMatch = s.match(/(?:cpc|cost per click)\\D{0,12}(?:₹|rs\\.?\\s*)?([\\d,.]+)/i);
-  const rateMatch = s.match(/(?:conversion rate|converts?)\\D{0,18}(\\d+(?:\\.\\d+)?)\\s*%?/i);
+  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\s*(?:a\s*)?([\d,]+)\s*clicks?/i);
+  const cpcMatch = s.match(/(?:cpc|cost per click)\D{0,12}(?:₹|rs\.?\s*)?([\d,.]+)/i);
+  const rateMatch = s.match(/(?:conversion rate|converts?)\D{0,18}(\d+(?:\.\d+)?)\s*%?/i);
   const statedClicks = clicksMatch ? Number(clicksMatch[1].replace(/,/g, "")) : null;
   const statedCpc = cpcMatch ? Number(cpcMatch[1].replace(/,/g, "")) : null;
-  const ratePct = rateMatch ? Number(rateMatch[1]) : 2.5;
-  const cpc = statedCpc && statedCpc > 0 ? statedCpc : statedClicks && statedClicks > 0 ? budget / statedClicks : 8;
-  const clicks = statedClicks && statedClicks > 0 ? statedClicks : budget / cpc;
-  if (![clicks, cpc, ratePct].every(Number.isFinite) || clicks <= 0 || cpc <= 0 || ratePct < 0 || ratePct > 100) return null;
+  const statedRate = rateMatch ? Number(rateMatch[1]) : null;
+  if ((statedClicks !== null && (!Number.isFinite(statedClicks) || statedClicks <= 0)) ||
+      (statedCpc !== null && (!Number.isFinite(statedCpc) || statedCpc <= 0)) ||
+      (statedRate !== null && (!Number.isFinite(statedRate) || statedRate < 0 || statedRate > 100))) return null;
 
-  const model: ModelSpec = {
-    name: "Google Ads clicks-to-conversions",
-    formula: "clicks * conversion_rate",
-    trials: 10000,
-    variables: [
-      { name: "clicks", distribution: { type: "uniform", min: clicks * 0.8, max: clicks * 1.2 } },
-      { name: "conversion_rate", distribution: { type: "uniform", min: Math.max(0, ratePct * 0.5 / 100), max: Math.min(1, ratePct * 1.5 / 100) } }
-    ]
-  };
-  const output = runModel(model);
+  const scenarios = [
+    { name: "Conservative", cpc: statedCpc || (statedClicks ? budget / statedClicks * 1.25 : 12), rate: statedRate ?? 1 },
+    { name: "Balanced", cpc: statedCpc || (statedClicks ? budget / statedClicks : 8), rate: statedRate ?? 2.5 },
+    { name: "Optimistic", cpc: statedCpc || (statedClicks ? budget / statedClicks * 0.75 : 5), rate: statedRate ?? 4 }
+  ];
+  const results = scenarios.map((scenario) => {
+    const estimatedClicks = statedClicks || budget / scenario.cpc;
+    const model: ModelSpec = {
+      name: "Neon Aether " + scenario.name + " ad scenario",
+      formula: "clicks * conversion_rate",
+      trials: 10000,
+      variables: [
+        { name: "clicks", distribution: { type: "uniform", min: estimatedClicks * 0.8, max: estimatedClicks * 1.2 } },
+        { name: "conversion_rate", distribution: { type: "uniform", min: Math.max(0, scenario.rate * 0.5 / 100), max: Math.min(1, scenario.rate * 1.5 / 100) } }
+      ]
+    };
+    return { scenario, estimatedClicks, output: runModel(model) };
+  });
+  const balanced = results[1];
   const explicitClicks = statedClicks !== null && statedClicks > 0;
   const assumptions = [
-    "Budget: ₹" + money(budget),
-    (explicitClicks ? "Clicks supplied: " : "Estimated clicks: ") + money(clicks),
-    "Average CPC: ₹" + cpc.toFixed(2) + (cpcMatch || explicitClicks ? " (derived from stated inputs)" : " (illustrative default)"),
-    "Conversion rate: " + ratePct.toFixed(2) + "%" + (rateMatch ? " (user supplied)" : " (illustrative default)"),
-    "10,000 trials; clicks and conversion rate vary around the assumptions"
+    "Campaign budget: ₹" + money(budget),
+    "Three scenarios, each with 10,000 Monte Carlo trials",
+    "Conservative: CPC ₹" + scenarios[0].cpc.toFixed(2) + ", target-action rate " + scenarios[0].rate.toFixed(2) + "%",
+    "Balanced: CPC ₹" + scenarios[1].cpc.toFixed(2) + ", target-action rate " + scenarios[1].rate.toFixed(2) + "%",
+    "Optimistic: CPC ₹" + scenarios[2].cpc.toFixed(2) + ", target-action rate " + scenarios[2].rate.toFixed(2) + "%",
+    explicitClicks ? "Click volume supplied by user; CPC scenarios are illustrative." : "Click volumes are estimated from the scenario CPC assumptions.",
+    statedRate !== null ? "Conversion rate supplied by user." : "Conversion rates are illustrative planning assumptions, not measured Neon Aether campaign data."
   ];
+
   return {
     kind: "ads",
-    title: "Google Ads campaign simulation",
-    summary: "A planning scenario using your budget. Where you did not specify campaign benchmarks, JARVIS uses clearly labeled illustrative defaults—not live Google Ads data.",
+    title: "Neon Aether — ₹" + money(budget) + " ad campaign simulations",
+    summary: "I ran three planning scenarios for a small Neon Aether campaign. 'Target actions' could mean a website visit that leads to a wishlist signup or another goal you choose; these are not guaranteed outcomes.",
     metrics: [
       { label: "Budget", value: "₹" + money(budget) },
-      { label: "Estimated clicks", value: money(clicks) },
-      { label: "Expected conversions", value: output.mean.toFixed(2) },
-      { label: "Estimated CPC", value: "₹" + cpc.toFixed(2) },
-      { label: "Assumed conversion rate", value: ratePct.toFixed(2) + "%" },
-      { label: "5th–95th percentile", value: output.p05.toFixed(1) + "–" + output.p95.toFixed(1) }
+      { label: "Conservative clicks", value: money(results[0].estimatedClicks) },
+      { label: "Conservative target actions", value: results[0].output.mean.toFixed(2) },
+      { label: "Balanced clicks", value: money(results[1].estimatedClicks) },
+      { label: "Balanced target actions", value: balanced.output.mean.toFixed(2) },
+      { label: "Optimistic clicks", value: money(results[2].estimatedClicks) },
+      { label: "Optimistic target actions", value: results[2].output.mean.toFixed(2) },
+      { label: "Balanced 5th–95th percentile", value: balanced.output.p05.toFixed(2) + "–" + balanced.output.p95.toFixed(2) }
     ],
-    chart: output.samples,
+    chart: balanced.output.samples,
     notes: [
-      "This is an illustrative simulation, not a forecast or a promise of Google Ads results.",
-      "Actual CPC and conversion rates depend on keywords, competition, targeting, landing page and campaign setup.",
-      "No campaign is created and no money is spent."
+      "Illustrative scenarios only—not a forecast, platform quote, or promise of results.",
+      "Actual performance depends on platform, audience, creative, bidding, landing page and campaign objective.",
+      "No ad campaign is created, no account is accessed, and no money is spent."
     ],
     assumptions
   };
