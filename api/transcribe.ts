@@ -40,7 +40,7 @@ export default async function handler(req: any, res: any) {
       smart_format: "true",
       punctuate: "true"
     });
-    for (const term of ["JARVIS", "Neon Aether", "ClearBoard", "Godot", "Ollama", "Vercel", "Groq", "Deepgram", "Monte Carlo", "Supabase", "Google Ads", "TypeScript", "Electron"]) {
+    for (const term of ["JARVIS", "Neon Aether", "ClearBoard", "Godot", "Ollama", "Vercel", "Groq", "Deepgram", "Monte Carlo", "Supabase", "Google Ads", "TypeScript", "Electron", "CAC", "C-A-C", "customer acquisition cost", "ROAS", "CTR", "LTV", "CPA", "CPC", "CPM", "conversion rate", "click-through rate", "cost per acquisition", "retention", "churn"]) {
       params.append("keyterm", term);
     }
     const upstream = await fetch(`https://api.deepgram.com/v1/listen?${params.toString()}`, {
