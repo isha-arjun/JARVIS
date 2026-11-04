@@ -48,7 +48,7 @@ function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): Si
   const conservative = read(s.match(/conservative(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
   const optimistic = read(s.match(/optimistic(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
   const balanced = read(s.match(/balanced(?:\\s+estimated)?\\s+clicks?\\D{0,24}([\\d,]+)/i));
-  const generic = read(s.match(/(?:expected\\s+outcome|expected|estimated)?\\s*clicks?\\s*[-:=]?\\s*([\\d,]+)|([\\d,]+)\\s*clicks?/i));
+  const generic = read(s.match(/(?:expected\\s+outcome|expected|estimated)?\\s*clicks?\\s*(?:(?:of|at|to)\\s+|[-:=]\\s*)?([\\d,]+)|([\\d,]+)\\s*clicks?/i));
   const rateMatch = s.match(/(?:conversion rate|converts?)\\D{0,18}(\\d+(?:\\.\\d+)?)\\s*%?/i);
   const rateInput = rateMatch ? Number(rateMatch[1]) : null;
   if ([conservative, optimistic, balanced, generic, rateInput].some((v) => v !== null && (!Number.isFinite(v) || v <= 0)) || (rateInput !== null && rateInput > 100)) return null;
