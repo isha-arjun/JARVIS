@@ -173,8 +173,8 @@ function simulate(kind: SimKind, prompt: string): SimResult {
   const revenue=parseNumber(s,[/(?:revenue|sales)\D{0,12}(?:₹|rs\.?\s*)?([\d,]+)/],50000),cost=parseNumber(s,[/(?:cost|expense|budget)\D{0,12}(?:₹|rs\.?\s*)?([\d,]+)/],30000);
   return {kind,title:"Business performance simulation",summary:"A baseline operating model. Adjust the assumptions to match the business you are analyzing.",metrics:[{label:"Revenue",value:"₹"+money(revenue)},{label:"Costs",value:"₹"+money(cost)},{label:"Net result",value:"₹"+money(revenue-cost)},{label:"Margin",value:(revenue?((revenue-cost)/revenue*100):0).toFixed(1)+"%"}],chart:Array.from({length:10},(_,i)=>Math.max(0,revenue-cost+rand(-cost*.25,cost*.25))),notes:["This model excludes tax, working capital, financing and other costs unless added to assumptions."],assumptions:["Revenue: ₹"+money(revenue),"Costs: ₹"+money(cost)]};
 }
-function speak(text:string){
- if(!("speechSynthesis" in window)||!text.trim())return;
+function speak(text:string):Promise<void>{
+ if(!("speechSynthesis" in window)||!text.trim())return Promise.resolve();
  const synth=window.speechSynthesis;synth.cancel();
  const clean=text.replace(/\*\*(.*?)\*\*/g,"$1").replace(/\s+/g," ").trim();
  const u=new SpeechSynthesisUtterance(clean);u.lang="en-GB";u.rate=.97;u.pitch=.94;u.volume=1;
@@ -184,7 +184,7 @@ function speak(text:string){
   ||voices.find(x=>/en-GB/i.test(x.lang))
   ||voices.find(x=>/^en/i.test(x.lang));
  if(preferred)u.voice=preferred;
- synth.speak(u);
+ return new Promise(resolve=>{u.onend=()=>resolve();u.onerror=()=>resolve();synth.speak(u);});
 }
 function wakeTokenDistance(a:string,b:string){
  const row=Array.from({length:b.length+1},(_,i)=>i);
@@ -267,8 +267,11 @@ export default function Workbench(){
           speak("Certainly.");
           send(command).finally(()=>wakeResume.current());
         }else{
-          speak("I'm listening. Go ahead.");
-          window.setTimeout(()=>startVoice(),1100);
+          // Wait for JARVIS's spoken prompt to finish before opening the microphone,
+          // otherwise Deepgram can transcribe JARVIS itself as the user's command.
+          void speak("I'm listening. Go ahead.").then(()=>{
+            if(wakeEnabled.current&&wakeBusy.current)window.setTimeout(()=>startVoice(),350);
+          });
         }
         break;
       }
