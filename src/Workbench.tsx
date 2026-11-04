@@ -37,8 +37,10 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
   return fallback;
 }
 function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string | null {
-  if (!/\b(cac|customer acquisition cost|cost per customer)\b/i.test(prompt)) return null;
   const conversation = [...history.filter((m) => m.role === "user").map((m) => m.text), prompt].join("\n");
+  const asksForCac = /\b(cac|customer acquisition cost|cost per customer)\b/i.test(prompt);
+  const changesConversionRate = /\b(conversion rate|converts?)\b/i.test(prompt) && /\d+(?:\.\d+)?\s*%/.test(prompt);
+  if (!asksForCac && !changesConversionRate) return null;
   const lastNumber = (pattern: RegExp): number | null => {
     const matches = [...conversation.matchAll(pattern)];
     const match = matches[matches.length - 1];
