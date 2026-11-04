@@ -37,8 +37,8 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
   return fallback;
 }
 function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string | null {
-  if (!/\\b(cac|customer acquisition cost|cost per customer)\\b/i.test(prompt)) return null;
-  const conversation = [...history.filter((m) => m.role === "user").map((m) => m.text), prompt].join("\\n");
+  if (!/\b(cac|customer acquisition cost|cost per customer)\b/i.test(prompt)) return null;
+  const conversation = [...history.filter((m) => m.role === "user").map((m) => m.text), prompt].join("\n");
   const lastNumber = (pattern: RegExp): number | null => {
     const matches = [...conversation.matchAll(pattern)];
     const match = matches[matches.length - 1];
@@ -47,9 +47,9 @@ function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string
     const value = Number(raw.replace(/,/g, ""));
     return Number.isFinite(value) && value > 0 ? value : null;
   };
-  const spend = lastNumber(/(?:₹|rs\\.?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?\\b/gi);
-  const clicks = lastNumber(/([\\d,]+)\\s*clicks?\\b|\\bclicks?\\s*(?:of|at|to)?\\s*([\\d,]+)/gi);
-  const conversionRate = lastNumber(/([\\d]+(?:\\.[\\d]+)?)\\s*%/gi);
+  const spend = lastNumber(/(?:₹|rs\.?\s*)([\d,]+)|([\d,]+)\s*rupees?\b/gi);
+  const clicks = lastNumber(/([\d,]+)\s*clicks?\b|\bclicks?\s*(?:of|at|to)?\s*([\d,]+)/gi);
+  const conversionRate = lastNumber(/([\d]+(?:\.[\d]+)?)\s*%/gi);
   if (spend === null || clicks === null || conversionRate === null || conversionRate > 100) return null;
   const customers = clicks * conversionRate / 100;
   if (customers <= 0) return null;
@@ -64,8 +64,8 @@ function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string
     "- **Customer acquisition cost (CAC): ₹" + cac.toFixed(2) + " per customer**",
     "",
     "Calculation: ₹" + money(spend) + " ÷ " + money(customers) + " customers = ₹" + cac.toFixed(2) + " CAC.",
-    "This assumes the 10% conversion rate represents clicks that become paying customers; it is an estimate, not measured campaign performance."
-  ].join("\\n");
+    "This assumes the conversion rate represents clicks that become paying customers; it is an estimate, not measured campaign performance."
+  ].join("\n");
 }
 function buildExplicitAdsSimulation(prompt: string, history: Message[] = []): SimResult | null {
   const s = prompt.toLowerCase();
