@@ -38,50 +38,59 @@ function parseNumber(text: string, patterns: RegExp[], fallback: number) {
 }
 function buildExplicitAdsSimulation(prompt: string): SimResult | null {
   const s = prompt.toLowerCase();
-  if (!/(ad campaign|advertising campaign|google ads|\badvertis|\bcampaign\b)/i.test(s)) return null;
-  const budgetMatch = s.match(/(?:₹|rs\.?\s*|rupees?\s*)([\d,]+)|([\d,]+)\s*rupees?/i);
-  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\s*(?:a\s*)?([\d,]+)\s*clicks?/i);
-  const rateMatch = s.match(/(?:conversion rate|converts?)\D{0,18}(\d+(?:\.\d+)?)\s*%?/i);
-  if (!budgetMatch || !clicksMatch || !rateMatch) return null;
+  if (!/(ad campaign|advertising campaign|google ads|\\badvertis|\\bcampaign\\b)/i.test(s)) return null;
+  const budgetMatch = s.match(/(?:₹|rs\\.?\\s*|rupees?\\s*)([\\d,]+)|([\\d,]+)\\s*rupees?/i);
+  if (!budgetMatch) return null;
   const budget = Number((budgetMatch[1] || budgetMatch[2]).replace(/,/g, ""));
-  const clicks = Number(clicksMatch[1].replace(/,/g, ""));
-  const ratePct = Number(rateMatch[1]);
-  if (![budget, clicks, ratePct].every(Number.isFinite) || budget <= 0 || clicks <= 0 || ratePct < 0 || ratePct > 100) return null;
+  if (!Number.isFinite(budget) || budget <= 0) return null;
+
+  const clicksMatch = s.match(/(?:around|about|approximately|roughly)?\\s*(?:a\\s*)?([\\d,]+)\\s*clicks?/i);
+  const cpcMatch = s.match(/(?:cpc|cost per click)\\D{0,12}(?:₹|rs\\.?\\s*)?([\\d,.]+)/i);
+  const rateMatch = s.match(/(?:conversion rate|converts?)\\D{0,18}(\\d+(?:\\.\\d+)?)\\s*%?/i);
+  const statedClicks = clicksMatch ? Number(clicksMatch[1].replace(/,/g, "")) : null;
+  const statedCpc = cpcMatch ? Number(cpcMatch[1].replace(/,/g, "")) : null;
+  const ratePct = rateMatch ? Number(rateMatch[1]) : 2.5;
+  const cpc = statedCpc && statedCpc > 0 ? statedCpc : statedClicks && statedClicks > 0 ? budget / statedClicks : 8;
+  const clicks = statedClicks && statedClicks > 0 ? statedClicks : budget / cpc;
+  if (![clicks, cpc, ratePct].every(Number.isFinite) || clicks <= 0 || cpc <= 0 || ratePct < 0 || ratePct > 100) return null;
+
   const model: ModelSpec = {
-    name: "Ad campaign clicks-to-conversions",
+    name: "Google Ads clicks-to-conversions",
     formula: "clicks * conversion_rate",
     trials: 10000,
     variables: [
-      { name: "clicks", distribution: { type: "uniform", min: clicks * 0.9, max: clicks * 1.1 } },
-      { name: "conversion_rate", distribution: { type: "fixed", value: ratePct / 100 } }
+      { name: "clicks", distribution: { type: "uniform", min: clicks * 0.8, max: clicks * 1.2 } },
+      { name: "conversion_rate", distribution: { type: "uniform", min: Math.max(0, ratePct * 0.5 / 100), max: Math.min(1, ratePct * 1.5 / 100) } }
     ]
   };
   const output = runModel(model);
-  const cpc = budget / clicks;
+  const explicitClicks = statedClicks !== null && statedClicks > 0;
+  const assumptions = [
+    "Budget: ₹" + money(budget),
+    (explicitClicks ? "Clicks supplied: " : "Estimated clicks: ") + money(clicks),
+    "Average CPC: ₹" + cpc.toFixed(2) + (cpcMatch || explicitClicks ? " (derived from stated inputs)" : " (illustrative default)"),
+    "Conversion rate: " + ratePct.toFixed(2) + "%" + (rateMatch ? " (user supplied)" : " (illustrative default)"),
+    "10,000 trials; clicks and conversion rate vary around the assumptions"
+  ];
   return {
     kind: "ads",
-    title: "Advertising campaign simulation",
-    summary: "A focused clicks-to-conversions model using your stated budget, approximate click volume and conversion rate. Click volume varies by ±10% to reflect the word “around.”",
+    title: "Google Ads campaign simulation",
+    summary: "A planning scenario using your budget. Where you did not specify campaign benchmarks, JARVIS uses clearly labeled illustrative defaults—not live Google Ads data.",
     metrics: [
       { label: "Budget", value: "₹" + money(budget) },
-      { label: "Target clicks", value: money(clicks) },
-      { label: "Estimated conversions", value: output.mean.toFixed(2) },
-      { label: "Estimated cost per click", value: "₹" + cpc.toFixed(2) },
-      { label: "Conversion rate", value: ratePct.toFixed(2) + "%" },
+      { label: "Estimated clicks", value: money(clicks) },
+      { label: "Expected conversions", value: output.mean.toFixed(2) },
+      { label: "Estimated CPC", value: "₹" + cpc.toFixed(2) },
+      { label: "Assumed conversion rate", value: ratePct.toFixed(2) + "%" },
       { label: "5th–95th percentile", value: output.p05.toFixed(1) + "–" + output.p95.toFixed(1) }
     ],
     chart: output.samples,
     notes: [
-      "This is an illustrative simulation, not a forecast of actual ad-platform performance.",
+      "This is an illustrative simulation, not a forecast or a promise of Google Ads results.",
+      "Actual CPC and conversion rates depend on keywords, competition, targeting, landing page and campaign setup.",
       "No campaign is created and no money is spent."
     ],
-    assumptions: [
-      "Budget: ₹" + money(budget),
-      "Clicks: " + money(clicks) + " target, varied by ±10%",
-      "Conversion rate: " + ratePct.toFixed(2) + "%",
-      "Implied CPC at the target: ₹" + cpc.toFixed(2),
-      "10,000 Monte Carlo trials"
-    ]
+    assumptions
   };
 }
 function simulate(kind: SimKind, prompt: string): SimResult {
