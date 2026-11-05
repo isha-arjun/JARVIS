@@ -71,7 +71,7 @@ function buildExplicitCacAnswer(prompt: string, history: Message[] = []): string
   ].join("\n");
 }
 function buildExplicitCacSimulation(prompt: string, history: Message[] = []): SimResult | null {
-  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join("\n");
+  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join("\n").replace(/\b(?:a|one)\s+thousand\b|\bthousand\b/gi, "1000");
   if (!/\b(cac|customer acquisition cost|cost per customer)\b/i.test(conversation)) return null;
   const last = (pattern: RegExp): number | null => {
     const matches = [...conversation.matchAll(pattern)];
@@ -110,7 +110,7 @@ function buildExplicitCacSimulation(prompt: string, history: Message[] = []): Si
   };
 }
 function isIncompleteCacRequest(prompt: string, history: Message[] = []): string | null {
-  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join(" ");
+  const conversation = [...history.filter(m => m.role === "user").map(m => m.text), prompt].join(" ").replace(/\b(?:a|one)\s+thousand\b|\bthousand\b/gi, "1000");
   if (!/\b(cac|customer acquisition cost|cost per customer)\b/i.test(conversation)) return null;
   if (!/(?:₹|rs\.?\s*|[\d,]+\s*rupees?)/i.test(conversation) || !/\d[\d,]*\s*clicks?\b/i.test(conversation)) return null;
   if (!/(?:conversion rate|converts?)\D{0,24}\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%/i.test(conversation)) return "What conversion rate should I use for the CAC simulation?";
