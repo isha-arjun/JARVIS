@@ -61,7 +61,10 @@ export default async function handler(req: any, res: any) {
       })
     });
     const parseDecision = (raw: string): any | null => {
-      const content = raw.trim().replace(/^\`\`\`(?:json)?\\s*/i, "").replace(/\\s*\`\`\`$/, "").trim();
+      const lines = raw.trim().split("\n");
+      if (lines[0]?.trim().startsWith("```")) lines.shift();
+      if (lines[lines.length - 1]?.trim() === "```") lines.pop();
+      const content = lines.join("\n").trim();
       try {
         const parsed = JSON.parse(content);
         if (parsed && typeof parsed.reply === "string") {
